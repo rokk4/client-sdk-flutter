@@ -366,34 +366,6 @@ class Engine extends Disposable with EventsEmittable<EngineEvent> {
       throw UnexpectedStateException('Data channel for ${packet.kind.toSDKType()} is null');
     }
 
-    if (_e2eeManager != null && _e2eeManager!.isDataChannelEncryptionEnabled) {
-      final encryptablePacket = asEncryptablePacket(packet);
-      if (encryptablePacket != null) {
-        final encryptedData = await _e2eeManager?.encryptData(data: encryptablePacket.writeToBuffer());
-
-        if (encryptedData == null) {
-          logger.warning('Failed to encrypt data packet');
-          return;
-        }
-
-        final encryptedPacket = lk_models.EncryptedPacket(
-          encryptionType: lk_models.Encryption_Type.GCM,
-          encryptedValue: encryptedData.data,
-          iv: encryptedData.iv,
-          keyIndex: encryptedData.keyIndex,
-        );
-
-        final dataToSend = lk_models.DataPacket(
-          participantIdentity: packet.participantIdentity,
-          kind: packet.kind,
-          encryptedPacket: encryptedPacket,
-          destinationIdentities: packet.destinationIdentities,
-        );
-
-        message = rtc.RTCDataChannelMessage.fromBinary(dataToSend.writeToBuffer());
-      }
-    }
-
     logger.fine('sendDataPacket(label:${channel.label})');
     await channel.send(message);
 
@@ -415,58 +387,6 @@ class Engine extends Disposable with EventsEmittable<EngineEvent> {
           duration: connectOptions.timeouts.peerConnection,
         );
       }
-    }
-  }
-
-  lk_models.EncryptedPacketPayload? asEncryptablePacket(lk_models.DataPacket packet) {
-    if ([
-          lk_models.DataPacket_Value.sipDtmf,
-          lk_models.DataPacket_Value.metrics,
-          lk_models.DataPacket_Value.speaker,
-          lk_models.DataPacket_Value.transcription,
-          lk_models.DataPacket_Value.encryptedPacket
-        ].contains(packet.whichValue()) ==
-        false) {
-      switch (packet.whichValue()) {
-        case lk_models.DataPacket_Value.user:
-          return lk_models.EncryptedPacketPayload(user: packet.user);
-        case lk_models.DataPacket_Value.rpcRequest:
-          return lk_models.EncryptedPacketPayload(rpcRequest: packet.rpcRequest);
-        case lk_models.DataPacket_Value.rpcResponse:
-          return lk_models.EncryptedPacketPayload(rpcResponse: packet.rpcResponse);
-        case lk_models.DataPacket_Value.rpcAck:
-          return lk_models.EncryptedPacketPayload(rpcAck: packet.rpcAck);
-        case lk_models.DataPacket_Value.streamHeader:
-          return lk_models.EncryptedPacketPayload(streamHeader: packet.streamHeader);
-        case lk_models.DataPacket_Value.streamChunk:
-          return lk_models.EncryptedPacketPayload(streamChunk: packet.streamChunk);
-        case lk_models.DataPacket_Value.streamTrailer:
-          return lk_models.EncryptedPacketPayload(streamTrailer: packet.streamTrailer);
-        default:
-          return null;
-      }
-    }
-    return null;
-  }
-
-  lk_models.DataPacket asDataPacket(lk_models.EncryptedPacketPayload packet) {
-    switch (packet.whichValue()) {
-      case lk_models.EncryptedPacketPayload_Value.user:
-        return lk_models.DataPacket(user: packet.user);
-      case lk_models.EncryptedPacketPayload_Value.rpcRequest:
-        return lk_models.DataPacket(rpcRequest: packet.rpcRequest);
-      case lk_models.EncryptedPacketPayload_Value.rpcResponse:
-        return lk_models.DataPacket(rpcResponse: packet.rpcResponse);
-      case lk_models.EncryptedPacketPayload_Value.rpcAck:
-        return lk_models.DataPacket(rpcAck: packet.rpcAck);
-      case lk_models.EncryptedPacketPayload_Value.streamHeader:
-        return lk_models.DataPacket(streamHeader: packet.streamHeader);
-      case lk_models.EncryptedPacketPayload_Value.streamChunk:
-        return lk_models.DataPacket(streamChunk: packet.streamChunk);
-      case lk_models.EncryptedPacketPayload_Value.streamTrailer:
-        return lk_models.DataPacket(streamTrailer: packet.streamTrailer);
-      default:
-        throw Exception('Unknown encrypted packet type: ${packet.whichValue()}');
     }
   }
 
@@ -708,28 +628,11 @@ class Engine extends Disposable with EventsEmittable<EngineEvent> {
     }
     final dp = lk_models.DataPacket.fromBuffer(message.binary);
     if (dp.whichValue() == lk_models.DataPacket_Value.encryptedPacket) {
-      if (_e2eeManager == null) {
-        logger.warning('Received encrypted packet but E2EE not set up');
-        return;
-      }
-      final decryptedData = await _e2eeManager?.handleEncryptedData(
-        data: Uint8List.fromList(dp.encryptedPacket.encryptedValue),
-        iv: Uint8List.fromList(dp.encryptedPacket.iv),
-        participantIdentity: dp.participantIdentity,
-        keyIndex: dp.encryptedPacket.keyIndex,
-      );
-      if (decryptedData == null) {
-        logger.warning('Failed to decrypt data packet');
-        return;
-      }
-
-      final decryptedPacketPayload = lk_models.EncryptedPacketPayload.fromBuffer(decryptedData);
-      final newDp = asDataPacket(decryptedPacketPayload);
-
-      _emitDataPacket(newDp, encryptionType: dp.encryptedPacket.encryptionType.toLkType());
-    } else {
-      _emitDataPacket(dp);
+      logger.warning('Received encrypted packet but Data Packet Encryption is not supported in this version');
+      return;
     }
+
+    _emitDataPacket(dp);
   }
 
   void _emitDataPacket(lk_models.DataPacket dp, {EncryptionType encryptionType = EncryptionType.kNone}) {
