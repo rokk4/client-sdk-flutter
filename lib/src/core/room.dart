@@ -594,10 +594,10 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
       RemoteParticipant? rp = _getRemoteParticipantBySid(participantSid);
 
       if (rp == null) {
-        for (var i = 0; i < 5; i++) {
+        for (var i = 0; i < 600; i++) {
           if (rp != null) break;
           logger.warning('[audioElementLogs] _getRemoteParticipantBySid try: $i, sid: $participantSid');
-          await Future.delayed(Duration(seconds: i));
+          await Future.delayed(Duration(milliseconds: 100));
           rp = _getRemoteParticipantBySid(participantSid);
         }
       }
