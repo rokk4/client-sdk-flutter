@@ -565,7 +565,12 @@ class Utils {
 
 const refreshSubscribedCodecAfterNewCodec = 5000;
 
+// Check if codec is an SVC (Scalable Video Coding) codec
 bool isSVCCodec(String codec) => ['vp9', 'av1'].contains(codec.toLowerCase());
+
+// Check if codec is unsupported for E2EE (only AV1 currently)
+// VP9 is supported with full frame encryption
+bool isUnsupportedE2EECodec(String codec) => ['av1'].contains(codec.toLowerCase());
 
 class ScalabilityMode {
   late num spatial;

@@ -21,7 +21,7 @@ import '../events.dart';
 import '../extensions.dart';
 import '../logger.dart';
 import '../managers/event.dart';
-import '../utils.dart';
+import '../utils.dart' show isUnsupportedE2EECodec;
 import 'events.dart';
 import 'key_provider.dart';
 import 'options.dart';
@@ -47,8 +47,8 @@ class E2EEManager {
       _listener!
         ..on<LocalTrackPublishedEvent>((event) async {
           if (event.publication.encryptionType == EncryptionType.kNone ||
-              isSVCCodec(event.publication.track?.codec ?? '')) {
-            // no need to setup frame cryptor
+              isUnsupportedE2EECodec(event.publication.track?.codec ?? '')) {
+            // no need to setup frame cryptor (currently only AV1 is unsupported)
             return;
           }
           final frameCryptor = await _addRtpSender(
@@ -81,8 +81,8 @@ class E2EEManager {
         })
         ..on<TrackSubscribedEvent>((event) async {
           final codec = event.publication.mimeType.split('/')[1];
-          if (event.publication.encryptionType == EncryptionType.kNone || isSVCCodec(codec)) {
-            // no need to setup frame cryptor
+          if (event.publication.encryptionType == EncryptionType.kNone || isUnsupportedE2EECodec(codec)) {
+            // no need to setup frame cryptor (currently only AV1 is unsupported)
             return;
           }
           final frameCryptor = await _addRtpReceiver(
