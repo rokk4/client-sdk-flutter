@@ -21,7 +21,7 @@ import '../events.dart';
 import '../extensions.dart';
 import '../logger.dart';
 import '../managers/event.dart';
-import '../utils.dart' show isUnsupportedE2EECodec;
+import '../utils.dart' show isAV1Codec;
 import 'events.dart';
 import 'key_provider.dart';
 import 'options.dart';
