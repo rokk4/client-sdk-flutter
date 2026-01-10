@@ -47,8 +47,8 @@ class E2EEManager {
       _listener!
         ..on<LocalTrackPublishedEvent>((event) async {
           if (event.publication.encryptionType == EncryptionType.kNone ||
-              isUnsupportedE2EECodec(event.publication.track?.codec ?? '')) {
-            // no need to setup frame cryptor (currently only AV1 is unsupported)
+              isAV1Codec(event.publication.track?.codec ?? '')) {
+            // no need to setup frame cryptor
             return;
           }
           final frameCryptor = await _addRtpSender(
@@ -81,8 +81,8 @@ class E2EEManager {
         })
         ..on<TrackSubscribedEvent>((event) async {
           final codec = event.publication.mimeType.split('/')[1];
-          if (event.publication.encryptionType == EncryptionType.kNone || isUnsupportedE2EECodec(codec)) {
-            // no need to setup frame cryptor (currently only AV1 is unsupported)
+          if (event.publication.encryptionType == EncryptionType.kNone || isAV1Codec(codec)) {
+            // no need to setup frame cryptor
             return;
           }
           final frameCryptor = await _addRtpReceiver(
