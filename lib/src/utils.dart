@@ -15,8 +15,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data' show Uint8List;
 
-import 'package:flutter/foundation.dart' hide internal;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 
 import 'package:collection/collection.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -33,6 +34,7 @@ import 'options.dart';
 import 'support/platform.dart';
 import 'track/local/video.dart';
 import 'types/other.dart';
+import 'types/priority.dart';
 import 'types/video_dimensions.dart';
 import 'types/video_encoding.dart';
 import 'types/video_parameters.dart';
@@ -428,6 +430,8 @@ class Utils {
             rid: videoRids[2 - i],
             maxBitrate: videoEncoding.maxBitrate ~/ math.pow(3, i),
             maxFramerate: original.encoding!.maxFramerate,
+            priority: videoEncoding.bitratePriority?.toRtcpPriorityType() ?? rtc.RTCPriorityType.low,
+            networkPriority: videoEncoding.networkPriority?.toRtcpPriorityType(),
           ));
         }
       } else {
