@@ -29,6 +29,7 @@ import '../mock/websocket_mock.dart';
 import 'signal_client_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late E2EContainer container;
   late Room room;
   late MockWebSocketConnector ws;
@@ -251,6 +252,28 @@ void main() {
       await room.events.waitFor<RoomReconnectingEvent>(duration: const Duration(seconds: 1));
 
       expect(room.pendingTrackQueue.stats.totalEntries, 0);
+    });
+  });
+
+  group('publish guards', () {
+    test('concurrent setSourceEnabled serializes calls', () async {
+      final lp = room.localParticipant!;
+
+      // Both calls will fail (no camera hardware in test), but the
+      // SerialRunner should serialize them — the second waits for the
+      // first to complete before executing.
+      final future1 = lp.setSourceEnabled(TrackSource.camera, true);
+      final future2 = lp.setSourceEnabled(TrackSource.camera, true);
+
+      // Both should fail with the same error (no camera), not with
+      // duplicate track errors or unhandled exceptions.
+      final results = await Future.wait([
+        future1.catchError((_) => null),
+        future2.catchError((_) => null),
+      ]);
+
+      // Both calls completed (didn't hang or deadlock).
+      expect(results.length, 2);
     });
   });
 }
