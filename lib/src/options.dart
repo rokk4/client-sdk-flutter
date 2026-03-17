@@ -182,10 +182,12 @@ class RoomOptions {
 }
 
 enum DegradationPreference {
+  @Deprecated('DISABLED is Deprecated for DegradationPreference')
   disabled,
   maintainFramerate,
   maintainResolution,
   balanced,
+  maintainFramerateAndResolution,
 }
 
 class BackupVideoCodec {
