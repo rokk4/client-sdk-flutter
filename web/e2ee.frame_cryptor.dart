@@ -187,16 +187,7 @@ class FrameCryptor {
       }
     }
 
-    // Handle codec-specific encryption strategies
-    final codecLower = codec?.toLowerCase() ?? '';
-    
-    // VP9: Encrypt entire frame (0 unencrypted bytes)
-    if (codecLower == 'vp9') {
-      return 0;
-    }
-    
-    // H.264/H.265: Use NALU parsing to find slice headers
-    if (['h264', 'h265'].contains(codecLower)) {
+    if (['h264', 'h265'].contains(codec?.toLowerCase() ?? '')) {
       if (data == null) {
         throw StateError('Frame data is null for codec $codec');
       }
@@ -219,7 +210,6 @@ class FrameCryptor {
       return result.unencryptedBytes;
     }
 
-    // VP8 and fallback: Use frame type to determine unencrypted bytes
     switch (frameType) {
       case 'key':
         return 10;

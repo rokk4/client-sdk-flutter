@@ -195,6 +195,7 @@ class Utils {
         if (reconnect && reconnectReason != null) 'reconnect_reason': reconnectReason.value.toString(),
         if (reconnect && sid != null) 'sid': sid,
         'protocol': connectOptions.protocolVersion.toStringValue(),
+        'client_protocol': connectOptions.clientProtocolVersion.toStringValue(),
         'sdk': 'flutter',
         'version': LiveKitClient.version,
         'network': networkType,
@@ -626,6 +627,8 @@ const refreshSubscribedCodecAfterNewCodec = 5000;
 
 // Check if codec is an SVC (Scalable Video Coding) codec
 bool isSVCCodec(String codec) => ['vp9', 'av1'].contains(codec.toLowerCase());
+
+bool isVideoCodec(String codec) => ['vp8', 'vp9', 'av1', 'h264', 'h265'].contains(codec.toLowerCase());
 
 bool isAV1Codec(String codec) => codec.toLowerCase() == 'av1';
 

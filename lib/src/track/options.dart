@@ -14,6 +14,8 @@
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import 'package:meta/meta.dart';
+
 import '../support/native.dart';
 import '../support/platform.dart';
 import '../track/local/audio.dart';
@@ -243,6 +245,9 @@ abstract class VideoCaptureOptions extends LocalTrackOptions {
 }
 
 /// Selects whether a voice-processing component uses platform or software processing.
+///
+/// Experimental: this API may change in a future release.
+@experimental
 enum AudioProcessingMode {
   automatic('auto'),
   platform('platform'),
@@ -260,6 +265,9 @@ enum AudioProcessingMode {
 /// the updated processing config. The effective audio processing module config
 /// is shared by the native voice engine/channel, so conflicting updates from
 /// multiple local tracks are not isolated per track.
+///
+/// Experimental: this API may change in a future release.
+@experimental
 class AudioProcessingOptions {
   const AudioProcessingOptions({
     required this.echoCancellation,
@@ -282,7 +290,7 @@ class AudioProcessingOptions {
         autoGainControlMode = AudioProcessingMode.automatic,
         highPassFilterMode = AudioProcessingMode.automatic;
 
-  const AudioProcessingOptions.raw()
+  const AudioProcessingOptions.noProcessing()
       : echoCancellation = false,
         noiseSuppression = false,
         autoGainControl = false,
@@ -509,55 +517,55 @@ class AudioOutputOptions {
   }
 }
 
-/// Result code from applying [AudioProcessingOptions], mirroring the native
-/// `AudioProcessingOptionsResult`. `applied`/`stored` are success; the rest are
-/// rejections.
-enum AudioProcessingOptionsResultCode {
-  applied('applied'),
-  stored('stored'),
-  rejectedRemoteTrack('rejectedRemoteTrack'),
-  rejectedInvalidCombination('rejectedInvalidCombination'),
-  rejectedPlatformUnavailable('rejectedPlatformUnavailable'),
-  applyFailed('applyFailed');
+/// Reason that applying [AudioProcessingOptions] failed.
+///
+/// Experimental: this API may change in a future release.
+@experimental
+enum AudioProcessingFailureReason {
+  /// The requested mode combination is invalid for the native audio module.
+  invalidCombination,
 
-  const AudioProcessingOptionsResultCode(this.value);
+  /// The platform or device cannot provide the requested processing path.
+  platformUnavailable,
 
-  final String value;
+  /// The native layer attempted to apply the options but failed.
+  applyFailed,
 
-  static AudioProcessingOptionsResultCode fromValue(String? value) =>
-      AudioProcessingOptionsResultCode.values.firstWhere(
-        (e) => e.value == value,
-        orElse: () => AudioProcessingOptionsResultCode.applyFailed,
-      );
-
-  bool get isSuccess =>
-      this == AudioProcessingOptionsResultCode.applied || this == AudioProcessingOptionsResultCode.stored;
+  /// The native layer returned an unrecognized or malformed result.
+  unknown,
 }
 
-/// Thrown when the native layer rejects requested [AudioProcessingOptions]
-/// (e.g. an invalid platform/software combination, or platform processing that
-/// is unavailable on the device).
-class AudioProcessingException implements Exception {
-  AudioProcessingException(this.code, this.message);
+String _defaultAudioProcessingMessage(AudioProcessingFailureReason reason) {
+  switch (reason) {
+    case AudioProcessingFailureReason.invalidCombination:
+      return 'The requested audio processing mode combination is invalid.';
+    case AudioProcessingFailureReason.platformUnavailable:
+      return 'Audio processing options are unavailable on this platform or device.';
+    case AudioProcessingFailureReason.applyFailed:
+      return 'The native WebRTC audio processing module could not apply the requested options.';
+    case AudioProcessingFailureReason.unknown:
+      return 'Audio processing options failed for an unknown reason.';
+  }
+}
 
-  final AudioProcessingOptionsResultCode code;
+String _audioProcessingMessageOrDefault(AudioProcessingFailureReason reason, String message) {
+  final trimmed = message.trim();
+  return trimmed.isEmpty ? _defaultAudioProcessingMessage(reason) : trimmed;
+}
+
+/// Thrown when [AudioProcessingOptions] cannot be applied.
+///
+/// [reason] is a stable SDK category. [message] carries native details when
+/// available, or an SDK-provided fallback when native does not include details.
+///
+/// Experimental: this API may change in a future release.
+@experimental
+class AudioProcessingException implements Exception {
+  AudioProcessingException(this.reason, String message) : message = _audioProcessingMessageOrDefault(reason, message);
+
+  final AudioProcessingFailureReason reason;
   final String message;
 
   @override
-  String toString() => 'AudioProcessingException(${code.value}): $message';
-}
-
-/// Outcome of applying [AudioProcessingOptions].
-///
-/// Returned for operational outcomes — `applied`/`stored` (success), and the
-/// device-capability rejections `rejectedPlatformUnavailable`/`applyFailed`
-/// (inspect [isSuccess]). A malformed request (incompatible modes, or a
-/// non-local track) throws [AudioProcessingException] instead.
-class AudioProcessingApplyResult {
-  AudioProcessingApplyResult(this.code, this.message);
-
-  final AudioProcessingOptionsResultCode code;
-  final String message;
-
-  bool get isSuccess => code.isSuccess;
+  String toString() => 'AudioProcessingException(${reason.name}): $message';
 }
