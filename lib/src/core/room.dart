@@ -111,6 +111,12 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
 
   lk_models.Room? _roomInfo;
 
+  // Pending getSid() waiters, completed with '' at disposal so a Room.dispose
+  // without a disconnect event can't leave them hanging. Tracked as a field
+  // (and drained by the constructor's dispose routine) so repeated getSid()
+  // calls don't accumulate per-call onDispose closures.
+  final Set<Completer<String>> _pendingSidCompleters = {};
+
   /// a list of participants that are actively speaking, including local participant.
   UnmodifiableListView<Participant> get activeSpeakers => UnmodifiableListView<Participant>(_activeSpeakers);
   List<Participant> _activeSpeakers = [];
@@ -161,10 +167,10 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
   // getter would surprise SDK consumers — filter them out here.
   @internal
   Map<String, TextStreamHandler> get textStreamHandlers => Map.fromEntries(
-        _textStreamHandlers.entries.where(
-          (e) => e.key != kRpcRequestTopic && e.key != kRpcResponseTopic,
-        ),
-      );
+    _textStreamHandlers.entries.where(
+      (e) => e.key != kRpcRequestTopic && e.key != kRpcResponseTopic,
+    ),
+  );
 
   @internal
   Map<String, ByteStreamHandler> get byteStreamHandlers => _byteStreamHandlers;
@@ -174,11 +180,12 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
     ConnectOptions connectOptions = const ConnectOptions(),
     RoomOptions roomOptions = const RoomOptions(),
     Engine? engine,
-  }) : engine = engine ??
-            Engine(
-              connectOptions: connectOptions,
-              roomOptions: roomOptions,
-            ) {
+  }) : engine =
+           engine ??
+           Engine(
+             connectOptions: connectOptions,
+             roomOptions: roomOptions,
+           ) {
     //
     _engineListener = this.engine.createListener();
     _setUpEngineListeners();
@@ -213,6 +220,13 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
     preConnectAudioBuffer = PreConnectAudioBuffer(this);
 
     onDispose(() async {
+      // complete pending getSid() waiters so they don't hang on teardown
+      for (final completer in _pendingSidCompleters) {
+        if (!completer.isCompleted) {
+          completer.complete('');
+        }
+      }
+      _pendingSidCompleters.clear();
       // clean up routine
       await _cleanUp();
       // reject any in-flight RPC calls
@@ -271,21 +285,28 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
     @Deprecated('deprecated, please use roomOptions in Room constructor') RoomOptions? roomOptions,
     FastConnectOptions? fastConnectOptions,
   }) async {
-    var roomOptions = this.roomOptions;
-    if (lkPlatformIs(PlatformType.web) && (roomOptions.networkOptions.certificatePinning?.isEnabled ?? false)) {
-      throw UnsupportedError('Certificate pinning is not supported on Flutter web, '
-          'remove certificatePinning from NetworkOptions when targeting web');
+    var effectiveRoomOptions = roomOptions ?? this.roomOptions;
+    if (lkPlatformIs(PlatformType.web) &&
+        (effectiveRoomOptions.networkOptions.certificatePinning?.isEnabled ?? false)) {
+      throw UnsupportedError(
+        'Certificate pinning is not supported on Flutter web, '
+        'remove certificatePinning from NetworkOptions when targeting web',
+      );
     }
     connectOptions ??= ConnectOptions();
     _pendingTrackQueue.updateTimeouts(connectOptions.timeouts.subscribe);
     // ignore: deprecated_member_use_from_same_package
-    if ((roomOptions.encryption != null || roomOptions.e2eeOptions != null) && engine.e2eeManager == null) {
+    if ((effectiveRoomOptions.encryption != null || effectiveRoomOptions.e2eeOptions != null) &&
+        engine.e2eeManager == null) {
       if (!lkPlatformSupportsE2EE()) {
         throw LiveKitE2EEException('E2EE is not supported on this platform');
       }
       // ignore: deprecated_member_use_from_same_package
-      final e2eeOptions = roomOptions.encryption ?? roomOptions.e2eeOptions;
-      _e2eeManager = E2EEManager(e2eeOptions!.keyProvider, dcEncryptionEnabled: roomOptions.encryption != null);
+      final e2eeOptions = effectiveRoomOptions.encryption ?? effectiveRoomOptions.e2eeOptions;
+      _e2eeManager = E2EEManager(
+        e2eeOptions!.keyProvider,
+        dcEncryptionEnabled: effectiveRoomOptions.encryption != null,
+      );
       await _e2eeManager!.setup(this);
       engine.setE2eeManager(_e2eeManager);
     } else {
@@ -294,8 +315,8 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
 
     if (_e2eeManager != null) {
       // Disable backup codec when e2ee is enabled
-      roomOptions = roomOptions.copyWith(
-        defaultVideoPublishOptions: roomOptions.defaultVideoPublishOptions.copyWith(
+      effectiveRoomOptions = effectiveRoomOptions.copyWith(
+        defaultVideoPublishOptions: effectiveRoomOptions.defaultVideoPublishOptions.copyWith(
           backupVideoCodec: const BackupVideoCodec(enabled: false),
         ),
       );
@@ -307,25 +328,34 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
     }
     if (isCloudUrl(Uri.parse(url))) {
       if (_regionUrlProvider == null) {
-        _regionUrlProvider = RegionUrlProvider(url: url, token: token, networkOptions: roomOptions.networkOptions);
+        _regionUrlProvider = RegionUrlProvider(
+          url: url,
+          token: token,
+          networkOptions: effectiveRoomOptions.networkOptions,
+        );
       } else {
         _regionUrlProvider?.updateToken(token);
       }
       // trigger the first fetch without waiting for a response
       // if initial connection fails, this will speed up picking regional url
       // on subsequent runs
-      unawaited(_regionUrlProvider?.fetchRegionSettings().then((settings) {
-        _regionUrlProvider?.setServerReportedRegions(settings);
-      }).catchError((e) {
-        logger.warning('could not fetch region settings $e');
-      }));
+      unawaited(
+        _regionUrlProvider
+            ?.fetchRegionSettings()
+            .then((settings) {
+              _regionUrlProvider?.setServerReportedRegions(settings);
+            })
+            .catchError((e) {
+              logger.warning('could not fetch region settings $e');
+            }),
+      );
     }
 
     // Bridge a legacy RoomOptions speaker preference into the process-wide
     // AudioManager once, on the first connect. Skipping it on a later manual
     // connect of the same Room keeps a runtime speaker change from being
     // reverted. New code should call setSpeakerOutputPreferred directly.
-    final legacySpeakerOn = roomOptions.defaultAudioOutputOptions.speakerOn;
+    final legacySpeakerOn = effectiveRoomOptions.defaultAudioOutputOptions.speakerOn;
     if (legacySpeakerOn != null && !_legacySpeakerBridged && lkPlatformIsMobile()) {
       _legacySpeakerBridged = true;
       await AudioManager.instance.setSpeakerOutputPreferred(legacySpeakerOn);
@@ -340,7 +370,7 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
         _regionUrl ?? url,
         token,
         connectOptions: connectOptions,
-        roomOptions: roomOptions,
+        roomOptions: effectiveRoomOptions,
         fastConnectOptions: fastConnectOptions,
         regionUrlProvider: _regionUrlProvider,
       );
@@ -363,7 +393,7 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
             nextUrl,
             token,
             connectOptions: connectOptions,
-            roomOptions: roomOptions,
+            roomOptions: effectiveRoomOptions,
             fastConnectOptions: fastConnectOptions,
             regionUrlProvider: _regionUrlProvider,
           );
@@ -408,8 +438,10 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
     ..on<SignalSubscribedQualityUpdatedEvent>((event) async {
       // Dynacast is off or is unsupported
       if (!roomOptions.dynacast || _serverVersion == '0.15.1') {
-        logger.fine('Received subscribed quality update'
-            ' but Dynacast is off or server version is not supported.');
+        logger.fine(
+          'Received subscribed quality update'
+          ' but Dynacast is off or server version is not supported.',
+        );
         return;
       }
       // Find the publication
@@ -432,15 +464,20 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
         }
       } else if (event.subscribedQualities.isNotEmpty) {
         final videoTrack = publication.track as LocalVideoTrack;
-        await videoTrack.setPublishingLayers(videoTrack, event.subscribedQualities,
-            isSVC: isSVCCodec(videoTrack.codec ?? ''));
+        await videoTrack.setPublishingLayers(
+          videoTrack,
+          event.subscribedQualities,
+          isSVC: isSVCCodec(videoTrack.codec ?? ''),
+        );
       }
     })
     ..on<SignalSubscriptionPermissionUpdateEvent>((event) async {
-      logger.fine('SignalSubscriptionPermissionUpdateEvent '
-          'participantSid:${event.participantSid} '
-          'trackSid:${event.trackSid} '
-          'allowed:${event.allowed}');
+      logger.fine(
+        'SignalSubscriptionPermissionUpdateEvent '
+        'participantSid:${event.participantSid} '
+        'trackSid:${event.trackSid} '
+        'allowed:${event.allowed}',
+      );
 
       // find participant
       final participant = _remoteParticipants.bySid[event.participantSid];
@@ -454,11 +491,13 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
       }
       //
       await publication.updateSubscriptionAllowed(event.allowed);
-      emitWhenConnected(TrackSubscriptionPermissionChangedEvent(
-        participant: participant,
-        publication: publication,
-        state: publication.subscriptionState,
-      ));
+      emitWhenConnected(
+        TrackSubscriptionPermissionChangedEvent(
+          participant: participant,
+          publication: publication,
+          state: publication.subscriptionState,
+        ),
+      );
     })
     ..on<SignalRoomUpdateEvent>((event) async => _applyRoomUpdate(event.room))
     ..on<SignalRemoteMuteTrackEvent>((event) async {
@@ -487,8 +526,10 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
       _serverVersion = event.response.serverVersion;
       _serverRegion = event.response.serverRegion;
 
-      logger.fine('[Engine] Received JoinResponse, '
-          'serverVersion: ${event.response.serverVersion}');
+      logger.fine(
+        '[Engine] Received JoinResponse, '
+        'serverVersion: ${event.response.serverVersion}',
+      );
 
       _localParticipant ??= await LocalParticipant.createFromInfo(
         room: this,
@@ -519,11 +560,15 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
         // Only enable microphone if preconnect buffer is not active
         if (audioEnabled && !preConnectAudioBuffer.isRecording) {
           if (audio.track != null) {
-            await _localParticipant!.publishAudioTrack(audio.track as LocalAudioTrack,
-                publishOptions: roomOptions.defaultAudioPublishOptions);
+            await _localParticipant!.publishAudioTrack(
+              audio.track as LocalAudioTrack,
+              publishOptions: roomOptions.defaultAudioPublishOptions,
+            );
           } else {
-            await _localParticipant!
-                .setMicrophoneEnabled(true, audioCaptureOptions: roomOptions.defaultAudioCaptureOptions);
+            await _localParticipant!.setMicrophoneEnabled(
+              true,
+              audioCaptureOptions: roomOptions.defaultAudioCaptureOptions,
+            );
           }
         }
 
@@ -531,11 +576,15 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
         final bool videoEnabled = video.enabled == true || video.track != null;
         if (videoEnabled) {
           if (video.track != null) {
-            await _localParticipant!.publishVideoTrack(video.track as LocalVideoTrack,
-                publishOptions: roomOptions.defaultVideoPublishOptions);
+            await _localParticipant!.publishVideoTrack(
+              video.track as LocalVideoTrack,
+              publishOptions: roomOptions.defaultVideoPublishOptions,
+            );
           } else {
-            await _localParticipant!
-                .setCameraEnabled(true, cameraCaptureOptions: roomOptions.defaultCameraCaptureOptions);
+            await _localParticipant!.setCameraEnabled(
+              true,
+              cameraCaptureOptions: roomOptions.defaultCameraCaptureOptions,
+            );
           }
         }
 
@@ -543,18 +592,24 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
         final bool screenEnabled = screen.enabled == true || screen.track != null;
         if (screenEnabled) {
           if (screen.track != null) {
-            await _localParticipant!.publishVideoTrack(screen.track as LocalVideoTrack,
-                publishOptions: roomOptions.defaultVideoPublishOptions);
+            await _localParticipant!.publishVideoTrack(
+              screen.track as LocalVideoTrack,
+              publishOptions: roomOptions.defaultVideoPublishOptions,
+            );
           } else {
-            await _localParticipant!
-                .setScreenShareEnabled(true, screenShareCaptureOptions: roomOptions.defaultScreenShareCaptureOptions);
+            await _localParticipant!.setScreenShareEnabled(
+              true,
+              screenShareCaptureOptions: roomOptions.defaultScreenShareCaptureOptions,
+            );
           }
         }
       }
 
       for (final info in event.response.otherParticipants) {
-        logger.fine('Creating RemoteParticipant: sid = ${info.sid}(identity:${info.identity}) '
-            'tracks:${info.tracks.map((e) => e.sid)}');
+        logger.fine(
+          'Creating RemoteParticipant: sid = ${info.sid}(identity:${info.identity}) '
+          'tracks:${info.tracks.map((e) => e.sid)}',
+        );
         await _getOrCreateRemoteParticipant(info);
       }
 
@@ -623,11 +678,13 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
       await _sendSyncState();
     })
     ..on<EngineAttemptReconnectEvent>((event) async {
-      events.emit(RoomAttemptReconnectEvent(
-        attempt: event.attempt,
-        maxAttemptsRetry: event.maxAttempts,
-        nextRetryDelaysInMs: event.nextRetryDelaysInMs,
-      ));
+      events.emit(
+        RoomAttemptReconnectEvent(
+          attempt: event.attempt,
+          maxAttemptsRetry: event.maxAttempts,
+          nextRetryDelaysInMs: event.nextRetryDelaysInMs,
+        ),
+      );
       notifyListeners();
     })
     ..on<EngineDisconnectedEvent>((event) async {
@@ -984,7 +1041,7 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
 
     // localParticipant & remote participants
     final allParticipants = <String, Participant>{
-      if (localParticipant != null) localParticipant!.sid: localParticipant!,
+      ?localParticipant?.sid: ?localParticipant,
       ..._remoteParticipants.bySid,
     };
 
@@ -1039,11 +1096,13 @@ class Room extends DisposableChangeNotifier with EventsEmittable<RoomEvent> {
       if (trackPublication == null) continue;
       // update the stream state
       await trackPublication.updateStreamState(update.state.toLKType());
-      emitWhenConnected(TrackStreamStateUpdatedEvent(
-        participant: participant,
-        publication: trackPublication,
-        streamState: update.state.toLKType(),
-      ));
+      emitWhenConnected(
+        TrackStreamStateUpdatedEvent(
+          participant: participant,
+          publication: trackPublication,
+          streamState: update.state.toLKType(),
+        ),
+      );
     }
   }
 
@@ -1223,19 +1282,52 @@ extension RoomPrivateMethods on Room {
 
     final completer = Completer<String>();
 
-    events.on<SignalRoomUpdateEvent>((event) {
+    // SignalRoomUpdateEvent is emitted on the signal client's emitter (and
+    // consumed by _setUpSignalListeners) — it never appears on the Room's
+    // [events], so listen where it actually fires or the future returned
+    // here never completes. Created via createListener() so it is cancelled
+    // with its owner.
+    final roomUpdateListener = engine.signalClient.createListener();
+    roomUpdateListener.on<SignalRoomUpdateEvent>((event) {
       if (event.room.sid.isNotEmpty && !completer.isCompleted) {
         completer.complete(event.room.sid);
       }
     });
 
-    events.once<RoomDisconnectedEvent>((event) {
+    // A caller waiting while the connection is still being established: the
+    // sid may arrive inside the JoinResponse, which is applied via
+    // EngineJoinResponseEvent without a SignalRoomUpdateEvent.
+    final joinListener = engine.createListener();
+    joinListener.on<EngineJoinResponseEvent>((event) {
+      if (event.response.room.sid.isNotEmpty && !completer.isCompleted) {
+        completer.complete(event.response.room.sid);
+      }
+    });
+
+    final cancelDisconnectListen = events.once<RoomDisconnectedEvent>((event) {
       if (!completer.isCompleted) {
         completer.complete('');
       }
     });
 
-    return completer.future;
+    // Disposal without a disconnect event (Room.dispose during teardown)
+    // cancels the listeners above — the constructor's dispose routine
+    // completes every tracked waiter with '' instead of leaving the returned
+    // future pending forever.
+    _pendingSidCompleters.add(completer);
+
+    // The update may have been applied between the check above and the
+    // listener registration.
+    if (_roomInfo != null && _roomInfo!.sid.isNotEmpty && !completer.isCompleted) {
+      completer.complete(_roomInfo!.sid);
+    }
+
+    return completer.future.whenComplete(() async {
+      _pendingSidCompleters.remove(completer);
+      await roomUpdateListener.dispose();
+      await joinListener.dispose();
+      await cancelDisconnectListen?.call();
+    });
   }
 }
 
@@ -1261,11 +1353,12 @@ extension RoomDebugMethods on Room {
       return;
     }
     engine.signalClient.sendSimulateScenario(
-        speakerUpdate: speakerUpdate,
-        nodeFailure: nodeFailure,
-        migration: migration,
-        serverLeave: serverLeave,
-        switchCandidate: switchCandidate);
+      speakerUpdate: speakerUpdate,
+      nodeFailure: nodeFailure,
+      migration: migration,
+      serverLeave: serverLeave,
+      switchCandidate: switchCandidate,
+    );
   }
 }
 
@@ -1513,7 +1606,10 @@ extension DataStreamRoomMethods on Room {
 
   @internal
   Future<void> handleStreamHeader(
-      lk_models.DataStream_Header streamHeader, String participantIdentity, EncryptionType encryptionType) async {
+    lk_models.DataStream_Header streamHeader,
+    String participantIdentity,
+    EncryptionType encryptionType,
+  ) async {
     if (streamHeader.hasByteHeader()) {
       final streamHandlerCallback = _byteStreamHandlers[streamHeader.topic];
 

@@ -186,9 +186,9 @@ class CertificatePinningRule {
   });
 
   List<String> get allPins => [
-        ...primaryPins,
-        ...backupPins,
-      ];
+    ...primaryPins,
+    ...backupPins,
+  ];
 
   bool get hasSpkiPins => allPins.isNotEmpty;
 
@@ -347,12 +347,35 @@ class RoomOptions {
 }
 
 enum DegradationPreference {
-  @Deprecated('DISABLED is Deprecated for DegradationPreference')
+  @Deprecated('Use maintainFramerateAndResolution instead, WebRTC defines disabled as an alias for it')
   disabled,
   maintainFramerate,
   maintainResolution,
   balanced,
   maintainFramerateAndResolution,
+}
+
+/// Returns the degradation preference to use for a video track published under
+/// [source], when the application did not set one explicitly.
+///
+/// - Camera: [DegradationPreference.maintainFramerate] (smoother video for
+///   real-time communication)
+/// - Screen share: [DegradationPreference.maintainResolution] (clarity is
+///   critical for reading text/UI)
+/// - Other/unknown: [DegradationPreference.balanced]
+///
+/// Any other source means the application declined to declare a
+/// motion-vs-detail intent, so this falls back to balanced, the preference the
+/// WebRTC spec mandates as the default.
+DegradationPreference getDefaultDegradationPreference(TrackSource source) {
+  switch (source) {
+    case TrackSource.camera:
+      return DegradationPreference.maintainFramerate;
+    case TrackSource.screenShareVideo:
+      return DegradationPreference.maintainResolution;
+    default:
+      return DegradationPreference.balanced;
+  }
 }
 
 class BackupVideoCodec {
@@ -422,6 +445,13 @@ class VideoPublishOptions extends PublishOptions {
   /// Defaults to true.
   final bool simulcast;
 
+  /// Controls how the encoder trades off between resolution and framerate when
+  /// bandwidth is constrained.
+  ///
+  /// When null, the SDK picks a default based on the track's source, see
+  /// [getDefaultDegradationPreference]. A preference is always applied to video
+  /// senders, so leaving this null selects that default rather than deferring to
+  /// WebRTC's own implicit choice.
   final DegradationPreference? degradationPreference;
 
   final List<VideoParameters> videoSimulcastLayers;
@@ -432,18 +462,19 @@ class VideoPublishOptions extends PublishOptions {
 
   final BackupVideoCodec backupVideoCodec;
 
-  const VideoPublishOptions(
-      {super.name,
-      super.stream,
-      this.videoCodec = defaultVideoCodec,
-      this.videoEncoding,
-      this.screenShareEncoding,
-      this.simulcast = true,
-      this.videoSimulcastLayers = const [],
-      this.screenShareSimulcastLayers = const [],
-      this.backupVideoCodec = defualtBackupVideoCodec,
-      this.scalabilityMode,
-      this.degradationPreference});
+  const VideoPublishOptions({
+    super.name,
+    super.stream,
+    this.videoCodec = defaultVideoCodec,
+    this.videoEncoding,
+    this.screenShareEncoding,
+    this.simulcast = true,
+    this.videoSimulcastLayers = const [],
+    this.screenShareSimulcastLayers = const [],
+    this.backupVideoCodec = defualtBackupVideoCodec,
+    this.scalabilityMode,
+    this.degradationPreference,
+  });
 
   VideoPublishOptions copyWith({
     VideoEncoding? videoEncoding,
@@ -457,20 +488,19 @@ class VideoPublishOptions extends PublishOptions {
     String? scalabilityMode,
     String? name,
     String? stream,
-  }) =>
-      VideoPublishOptions(
-        videoEncoding: videoEncoding ?? this.videoEncoding,
-        screenShareEncoding: screenShareEncoding ?? this.screenShareEncoding,
-        simulcast: simulcast ?? this.simulcast,
-        videoSimulcastLayers: videoSimulcastLayers ?? this.videoSimulcastLayers,
-        screenShareSimulcastLayers: screenShareSimulcastLayers ?? this.screenShareSimulcastLayers,
-        videoCodec: videoCodec ?? this.videoCodec,
-        backupVideoCodec: backupVideoCodec ?? this.backupVideoCodec,
-        degradationPreference: degradationPreference ?? this.degradationPreference,
-        scalabilityMode: scalabilityMode ?? this.scalabilityMode,
-        name: name ?? this.name,
-        stream: stream ?? this.stream,
-      );
+  }) => VideoPublishOptions(
+    videoEncoding: videoEncoding ?? this.videoEncoding,
+    screenShareEncoding: screenShareEncoding ?? this.screenShareEncoding,
+    simulcast: simulcast ?? this.simulcast,
+    videoSimulcastLayers: videoSimulcastLayers ?? this.videoSimulcastLayers,
+    screenShareSimulcastLayers: screenShareSimulcastLayers ?? this.screenShareSimulcastLayers,
+    videoCodec: videoCodec ?? this.videoCodec,
+    backupVideoCodec: backupVideoCodec ?? this.backupVideoCodec,
+    degradationPreference: degradationPreference ?? this.degradationPreference,
+    scalabilityMode: scalabilityMode ?? this.scalabilityMode,
+    name: name ?? this.name,
+    stream: stream ?? this.stream,
+  );
 
   @override
   String toString() => '${runtimeType}(videoEncoding: ${videoEncoding}, simulcast: ${simulcast})';
@@ -512,15 +542,14 @@ class AudioPublishOptions extends PublishOptions {
     String? stream,
     bool? red,
     bool? preConnect,
-  }) =>
-      AudioPublishOptions(
-        encoding: encoding ?? this.encoding,
-        dtx: dtx ?? this.dtx,
-        name: name ?? this.name,
-        stream: stream ?? this.stream,
-        red: red ?? this.red,
-        preConnect: preConnect ?? this.preConnect,
-      );
+  }) => AudioPublishOptions(
+    encoding: encoding ?? this.encoding,
+    dtx: dtx ?? this.dtx,
+    name: name ?? this.name,
+    stream: stream ?? this.stream,
+    red: red ?? this.red,
+    preConnect: preConnect ?? this.preConnect,
+  );
 
   @override
   String toString() => '${runtimeType}(encoding: ${encoding}, dtx: ${dtx}, red: ${red}, preConnect: ${preConnect})';
